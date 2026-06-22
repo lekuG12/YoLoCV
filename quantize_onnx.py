@@ -188,7 +188,6 @@ def main():
         quant_format         = QuantFormat.QDQ,   # QDQ = standard for ORT
         activation_type      = QuantType.QInt8,
         weight_type          = QuantType.QInt8,
-        optimize_model       = True,
     )
     print(f"         ✓ Saved → {args.output}")
 
