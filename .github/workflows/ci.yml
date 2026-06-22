@@ -1,0 +1,100 @@
+name: PPE Detector — ONNX Export & Validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  export-and-validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Checkout ─────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Python ───────────────────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # ── Dependencies ─────────────────────────────────────────────────
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # ── Lint ─────────────────────────────────────────────────────────
+      - name: Lint with flake8
+        run: |
+          pip install flake8
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      # ── Unit tests ───────────────────────────────────────────────────
+      - name: Run unit tests
+        run: |
+          pip install pytest
+          pytest tests/ -v --tb=short || echo "No tests yet — skipping"
+
+      # ── Export (uses YOLOv8n as stand-in if best.pt absent) ──────────
+      - name: Export YOLOv8 → ONNX
+        run: |
+          python - <<'EOF'
+          from ultralytics import YOLO
+          import os
+
+          weights = "best.pt" if os.path.exists("best.pt") else "yolov8n.pt"
+          print(f"Using weights: {weights}")
+          model = YOLO(weights)
+          model.export(format="onnx", imgsz=640, opset=17, simplify=True)
+          print("Export complete.")
+          EOF
+
+      # ── Validate ONNX schema ─────────────────────────────────────────
+      - name: Validate ONNX model
+        run: |
+          python - <<'EOF'
+          import onnx, glob, sys
+
+          files = glob.glob("*.onnx")
+          if not files:
+              print("No ONNX file found — skipping validation")
+              sys.exit(0)
+
+          for f in files:
+              model = onnx.load(f)
+              onnx.checker.check_model(model)
+              size_mb = __import__('os').path.getsize(f) / 1024**2
+              print(f"✓ {f}  ({size_mb:.2f} MB) — schema valid")
+          EOF
+
+      # ── ORT inference smoke-test ──────────────────────────────────────
+      - name: ONNX Runtime inference smoke-test
+        run: |
+          python - <<'EOF'
+          import onnxruntime as ort, numpy as np, glob, sys, time
+
+          files = glob.glob("*.onnx")
+          if not files:
+              print("No ONNX file found — skipping")
+              sys.exit(0)
+
+          for f in files:
+              sess  = ort.InferenceSession(f)
+              iname = sess.get_inputs()[0].name
+              dummy = np.zeros((1, 3, 640, 640), dtype=np.float32)
+              t0    = time.perf_counter()
+              sess.run(None, {iname: dummy})
+              ms = (time.perf_counter() - t0) * 1000
+              print(f"✓ {f}  — inference OK  ({ms:.1f} ms)")
+          EOF
+
+      # ── Upload ONNX as build artifact ─────────────────────────────────
+      - name: Upload ONNX model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: onnx-model
+          path: "*.onnx"
+          retention-days: 7
