@@ -11,19 +11,16 @@ cap = None  # Initialize cap as None
 
 # Add initialization and cleanup functions
 def init_camera():
-    global cap
     if cap is None or not cap.isOpened():
         cap = cv.VideoCapture(0)
     return cap.isOpened()
 
 @atexit.register
 def cleanup():
-    global cap
     if cap is not None and cap.isOpened():
         cap.release()
 
 def captureFrames():
-    global cap
     if not init_camera():
         print('Could not initialize camera')
         return
@@ -59,7 +56,6 @@ def start():
 
 @app.route('/stop', methods=['POST'])
 def stop():
-    global cap
     if cap is not None and cap.isOpened():
         cap.release()
         cap = None
